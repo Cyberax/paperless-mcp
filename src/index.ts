@@ -30,6 +30,7 @@ const resolvedToken = token || process.env.PAPERLESS_API_KEY;
 const resolvedPublicUrl =
   publicUrl || process.env.PAPERLESS_PUBLIC_URL || resolvedBaseUrl;
 const resolvedPort = port ? parseInt(port, 10) : 3000;
+const mcpApiKey = process.env.MCP_CLIENT_API_KEY || '';
 
 if (!resolvedBaseUrl || !resolvedToken) {
   console.error(
@@ -74,6 +75,26 @@ The document tools return JSON data with document IDs that you can use to constr
 
   if (useHttp) {
     const app = express();
+    if (mcpApiKey) {
+      // Add the bearer authentication
+      app.use((req, res, next) => {
+        const authHeader = req.header("Authorization");
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+          console.warn('Unauthorized access: no Bearer authorization');
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        // Get the bearer token
+        const token = authHeader.split(" ")[1];
+        if (mcpApiKey !== token) {
+          console.warn('Unauthorized access: invalid Bearer token');
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+
+        next()
+      });
+    }
     app.use(express.json());
 
     // Store transports for each session
