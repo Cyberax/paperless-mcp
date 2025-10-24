@@ -35,6 +35,10 @@ const resolvedPublicUrl =
 const resolvedPort = port ? parseInt(port, 10) : 3000;
 const mcpClientId = process.env.MCP_CLIENT_ID || '';
 const mcpClientSecret = process.env.MCP_CLIENT_SECRET || '';
+const mcpOauthUrl = process.env.MCP_OAUTH_URL || '';
+const mcpTokenUrl = process.env.MCP_OAUTH_TOKEN_URL || '';
+const mcpPublicHost = process.env.MCP_PUBLIC_HOST || '';
+const mcpAllowedUsers = process.env.MCP_ALLOWED_USERS || '';
 
 if (!resolvedBaseUrl || !resolvedToken) {
   console.error(
@@ -78,12 +82,16 @@ The document tools return JSON data with document IDs that you can use to constr
   registerCustomFieldTools(server, api);
 
   if (useHttp) {
+    console.info("Using the HTTP mode");
     const app = express();
     app.use(express.json());
     app.use(express.urlencoded({ extended: false }));
 
     let needsOauth = mcpClientId && mcpClientSecret;
+    let auth = (cb) => {return cb};
+
     if (needsOauth) {
+      console.log("Setting up OAuth")
       let sess = {
         secret: mcpClientSecret + "sess", // Just reuse the secret
         cookie: {}
@@ -93,14 +101,19 @@ The document tools return JSON data with document IDs that you can use to constr
       app.use(passport.initialize());
       app.use(passport.session());
 
+      const allowedUsers = mcpAllowedUsers.split(",").map(user => user.trim());
+
       passport.use(new OAuth2Strategy({
-          authorizationURL: 'https://rauthy.ealex.net/auth/v1/oidc/authorize',
-          tokenURL: 'https://rauthy.ealex.net/auth/v1/oidc/token',
+          authorizationURL: mcpOauthUrl,
+          tokenURL: mcpTokenUrl,
           clientID: mcpClientId,
           clientSecret: mcpClientSecret,
-          callbackURL: "https://paperless-mcp.ealex.net/oauth/callback"
+          callbackURL: `${mcpPublicHost}/oauth/callback`
         },
         function(accessToken, refreshToken, profile, cb) {
+          if (allowedUsers.length > 0 && !allowedUsers.includes(profile.emails[0].value)) {
+            return cb("User not allowed", null);
+          }
           return cb(null, {
             "id": profile.id,
             "username": profile.emails[0].value,
@@ -114,16 +127,14 @@ The document tools return JSON data with document IDs that you can use to constr
           // Successful authentication, redirect home.
           res.redirect('/');
         });
+
+      auth = passport.authenticate('oauth2', { failureRedirect: '/' });
     }
 
     // Store transports for each session
     const sseTransports: Record<string, SSEServerTransport> = {};
 
-    app.post("/mcp", async (req, res) => {
-      if (needsOauth) {
-        passport.authenticate('oauth2', { failureRedirect: '/' });
-      }
-
+    app.post("/mcp", auth, async (req, res) => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
@@ -148,11 +159,7 @@ The document tools return JSON data with document IDs that you can use to constr
       }
     });
 
-    app.get("/mcp", async (req, res) => {
-      if (needsOauth) {
-        passport.authenticate('oauth2', { failureRedirect: '/' });
-      }
-
+    app.get("/mcp", auth, async (req, res) => {
       res.writeHead(405).end(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -165,11 +172,7 @@ The document tools return JSON data with document IDs that you can use to constr
       );
     });
 
-    app.delete("/mcp", async (req, res) => {
-      if (needsOauth) {
-        passport.authenticate('oauth2', { failureRedirect: '/' });
-      }
-
+    app.delete("/mcp", auth, async (req, res) => {
       res.writeHead(405).end(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -182,11 +185,7 @@ The document tools return JSON data with document IDs that you can use to constr
       );
     });
 
-    app.get("/sse", async (req, res) => {
-      if (needsOauth) {
-        passport.authenticate('oauth2', { failureRedirect: '/' });
-      }
-
+    app.get("/sse", auth, async (req, res) => {
       console.log("SSE request received");
       try {
         const transport = new SSEServerTransport("/messages", res);
@@ -211,11 +210,7 @@ The document tools return JSON data with document IDs that you can use to constr
       }
     });
 
-    app.post("/messages", async (req, res) => {
-      if (needsOauth) {
-        passport.authenticate('oauth2', { failureRedirect: '/' });
-      }
-
+    app.post("/messages", auth, async (req, res) => {
       const sessionId = req.query.sessionId as string;
       const transport = sseTransports[sessionId];
       if (transport) {
