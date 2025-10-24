@@ -11,6 +11,8 @@ import { registerCustomFieldTools } from "./tools/customFields";
 import { registerDocumentTools } from "./tools/documents";
 import { registerDocumentTypeTools } from "./tools/documentTypes";
 import { registerTagTools } from "./tools/tags";
+import passport from "passport";
+import OAuth2Strategy from "passport-oauth2"
 
 const {
   values: { baseUrl, token, http: useHttp, port, publicUrl },
@@ -30,7 +32,8 @@ const resolvedToken = token || process.env.PAPERLESS_API_KEY;
 const resolvedPublicUrl =
   publicUrl || process.env.PAPERLESS_PUBLIC_URL || resolvedBaseUrl;
 const resolvedPort = port ? parseInt(port, 10) : 3000;
-const mcpApiKey = process.env.MCP_CLIENT_API_KEY || '';
+const mcpClientId = process.env.MCP_CLIENT_ID || '';
+const mcpClientSecret = process.env.MCP_CLIENT_SECRET || '';
 
 if (!resolvedBaseUrl || !resolvedToken) {
   console.error(
@@ -75,32 +78,45 @@ The document tools return JSON data with document IDs that you can use to constr
 
   if (useHttp) {
     const app = express();
-    if (mcpApiKey) {
-      // Add the bearer authentication
-      app.use((req, res, next) => {
-        const authHeader = req.header("Authorization");
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-          console.warn('Unauthorized access: no Bearer authorization');
-          res.status(401).json({ error: "Unauthorized" });
-          return;
-        }
-        // Get the bearer token
-        const token = authHeader.split(" ")[1];
-        if (mcpApiKey !== token) {
-          console.warn('Unauthorized access: invalid Bearer token');
-          res.status(401).json({ error: "Unauthorized" });
-          return;
-        }
-
-        next()
-      });
-    }
     app.use(express.json());
+    app.use(express.urlencoded({ extended: false }));
+
+    let needsOauth = mcpClientId && mcpClientSecret;
+    if (needsOauth) {
+      app.use(passport.initialize());
+      app.use(passport.session());
+
+      passport.use(new OAuth2Strategy({
+          authorizationURL: 'https://rauthy.ealex.net/auth/v1/oidc/authorize',
+          tokenURL: 'https://rauthy.ealex.net/auth/v1/oidc/token',
+          clientID: mcpClientId,
+          clientSecret: mcpClientSecret,
+          callbackURL: "https://paperless-mcp.ealex.net/oauth/callback"
+        },
+        function(accessToken, refreshToken, profile, cb) {
+          return cb(null, {
+            "id": profile.id,
+            "username": profile.emails[0].value,
+          });
+        }
+      ));
+
+      app.get('/oauth/callback',
+        passport.authenticate('oauth2', { failureRedirect: '/' }),
+        function(req, res) {
+          // Successful authentication, redirect home.
+          res.redirect('/');
+        });
+    }
 
     // Store transports for each session
     const sseTransports: Record<string, SSEServerTransport> = {};
 
     app.post("/mcp", async (req, res) => {
+      if (needsOauth) {
+        passport.authenticate('oauth2', { failureRedirect: '/' });
+      }
+
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
@@ -126,6 +142,10 @@ The document tools return JSON data with document IDs that you can use to constr
     });
 
     app.get("/mcp", async (req, res) => {
+      if (needsOauth) {
+        passport.authenticate('oauth2', { failureRedirect: '/' });
+      }
+
       res.writeHead(405).end(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -139,6 +159,10 @@ The document tools return JSON data with document IDs that you can use to constr
     });
 
     app.delete("/mcp", async (req, res) => {
+      if (needsOauth) {
+        passport.authenticate('oauth2', { failureRedirect: '/' });
+      }
+
       res.writeHead(405).end(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -152,6 +176,10 @@ The document tools return JSON data with document IDs that you can use to constr
     });
 
     app.get("/sse", async (req, res) => {
+      if (needsOauth) {
+        passport.authenticate('oauth2', { failureRedirect: '/' });
+      }
+
       console.log("SSE request received");
       try {
         const transport = new SSEServerTransport("/messages", res);
@@ -177,6 +205,10 @@ The document tools return JSON data with document IDs that you can use to constr
     });
 
     app.post("/messages", async (req, res) => {
+      if (needsOauth) {
+        passport.authenticate('oauth2', { failureRedirect: '/' });
+      }
+
       const sessionId = req.query.sessionId as string;
       const transport = sseTransports[sessionId];
       if (transport) {
