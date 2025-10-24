@@ -4,6 +4,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
+import session from "express-session";
 import { parseArgs } from "node:util";
 import { PaperlessAPI } from "./api/PaperlessAPI";
 import { registerCorrespondentTools } from "./tools/correspondents";
@@ -83,6 +84,12 @@ The document tools return JSON data with document IDs that you can use to constr
 
     let needsOauth = mcpClientId && mcpClientSecret;
     if (needsOauth) {
+      let sess = {
+        secret: mcpClientSecret + "sess", // Just reuse the secret
+        cookie: {}
+      }
+      app.use(session(sess));
+
       app.use(passport.initialize());
       app.use(passport.session());
 
