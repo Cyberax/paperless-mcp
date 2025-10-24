@@ -13,7 +13,8 @@ import { registerDocumentTools } from "./tools/documents";
 import { registerDocumentTypeTools } from "./tools/documentTypes";
 import { registerTagTools } from "./tools/tags";
 import passport from "passport";
-import OAuth2Strategy from "passport-oauth2"
+import OAuth2Strategy from "passport-oauth2";
+import { jwtDecode } from "jwt-decode";
 
 const {
   values: { baseUrl, token, http: useHttp, port, publicUrl },
@@ -103,23 +104,27 @@ The document tools return JSON data with document IDs that you can use to constr
 
       const allowedUsers = mcpAllowedUsers.split(",").map(user => user.trim());
 
-      passport.use(new OAuth2Strategy({
+      let oauth2Strategy = new OAuth2Strategy({
           authorizationURL: mcpOauthUrl,
           tokenURL: mcpTokenUrl,
           clientID: mcpClientId,
           clientSecret: mcpClientSecret,
-          callbackURL: `${mcpPublicHost}/oauth/callback`
+          callbackURL: `${mcpPublicHost}/oauth/callback`,
+          pkce: true,
         },
-        function(accessToken, refreshToken, profile, cb) {
+        function(accessToken, refreshToken, results, profile, cb) {
+          const decoded = jwtDecode(results['id_token']);
+          console.log("Profile received", decoded);
           if (allowedUsers.length > 0 && !allowedUsers.includes(profile.emails[0].value)) {
-            return cb("User not allowed", null);
+            return cb("User not allowed", false);
           }
           return cb(null, {
             "id": profile.id,
-            "username": profile.emails[0].value,
+            "username": profile,
           });
         }
-      ));
+      );
+      passport.use(oauth2Strategy);
 
       app.get('/oauth/callback',
         passport.authenticate('oauth2', { failureRedirect: '/' }),
