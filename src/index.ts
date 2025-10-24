@@ -110,17 +110,17 @@ The document tools return JSON data with document IDs that you can use to constr
           clientID: mcpClientId,
           clientSecret: mcpClientSecret,
           callbackURL: `${mcpPublicHost}/oauth/callback`,
-          pkce: true,
+          scope: ["email"],
         },
         function(accessToken, refreshToken, results, profile, cb) {
           const decoded = jwtDecode(results['id_token']);
           console.log("Profile received", decoded);
-          if (allowedUsers.length > 0 && !allowedUsers.includes(profile.emails[0].value)) {
+          if (allowedUsers.length > 0 && !allowedUsers.includes(decoded["email"])) {
             return cb("User not allowed", false);
           }
           return cb(null, {
-            "id": profile.id,
-            "username": profile,
+            "id": decoded["sub"],
+            "username": decoded["email"],
           });
         }
       );
