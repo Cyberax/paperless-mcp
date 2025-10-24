@@ -102,6 +102,14 @@ The document tools return JSON data with document IDs that you can use to constr
       app.use(passport.initialize());
       app.use(passport.session());
 
+      passport.serializeUser((user, done) => {
+        done(null, JSON.stringify(user));
+      });
+
+      passport.deserializeUser(async (saved: string, done) => {
+        done(null, JSON.parse(saved));
+      });
+
       const allowedUsers = mcpAllowedUsers.split(",").map(user => user.trim());
 
       let oauth2Strategy = new OAuth2Strategy({
@@ -114,8 +122,7 @@ The document tools return JSON data with document IDs that you can use to constr
         },
         function(accessToken, refreshToken, results, profile, cb) {
           const decoded = jwtDecode(results['id_token']);
-          console.log("Profile received", decoded);
-          if (allowedUsers.length > 0 && !allowedUsers.includes(decoded["email"])) {
+          if (allowedUsers.length > 0 && (!allowedUsers.includes(decoded["email"]) || !decoded["email_verified"])) {
             return cb("User not allowed", false);
           }
           return cb(null, {
