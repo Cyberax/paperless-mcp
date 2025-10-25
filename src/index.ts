@@ -103,10 +103,11 @@ The document tools return JSON data with document IDs that you can use to constr
           return {
             token,
             clientId: '123',
-            scopes: ['openid', 'email', 'profile']
+            scopes: ['openid', 'email']
           };
         },
         getClient: async client_id => {
+          console.log("Client", client_id);
           return {
             client_id,
             redirect_uris: [`${mcpPublicHost}/oauth/callback`]
