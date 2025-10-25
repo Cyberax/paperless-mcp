@@ -96,6 +96,7 @@ The document tools return JSON data with document IDs that you can use to constr
         endpoints: {
           authorizationUrl: mcpOauthUrl,
           tokenUrl: mcpTokenUrl,
+          registrationUrl: "https://rauthy.ealex.net/auth/v1/clients_dyn",
         },
         verifyAccessToken: async token => {
           console.log("Token:", token)
@@ -172,7 +173,7 @@ The document tools return JSON data with document IDs that you can use to constr
       );
     });
 
-    app.delete("/mcp", async (req, res) => {
+    app.delete("/mcp", auth, async (req, res) => {
       res.writeHead(405).end(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -210,7 +211,7 @@ The document tools return JSON data with document IDs that you can use to constr
       }
     });
 
-    app.post("/messages", async (req, res) => {
+    app.post("/messages", auth, async (req, res) => {
       const sessionId = req.query.sessionId as string;
       const transport = sseTransports[sessionId];
       if (transport) {
