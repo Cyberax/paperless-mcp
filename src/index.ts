@@ -3,8 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import express from "express";
-import session from "express-session";
+import express, { RequestHandler } from "express";
 import { parseArgs } from "node:util";
 import { PaperlessAPI } from "./api/PaperlessAPI";
 import { registerCorrespondentTools } from "./tools/correspondents";
@@ -12,9 +11,9 @@ import { registerCustomFieldTools } from "./tools/customFields";
 import { registerDocumentTools } from "./tools/documents";
 import { registerDocumentTypeTools } from "./tools/documentTypes";
 import { registerTagTools } from "./tools/tags";
-import passport from "passport";
-import OAuth2Strategy from "passport-oauth2";
-import { jwtDecode } from "jwt-decode";
+import { ProxyOAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/providers/proxyProvider.js';
+import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 
 const {
   values: { baseUrl, token, http: useHttp, port, publicUrl },
@@ -89,58 +88,47 @@ The document tools return JSON data with document IDs that you can use to constr
     app.use(express.urlencoded({ extended: false }));
 
     let needsOauth = mcpClientId && mcpClientSecret;
-    let auth = (cb) => {return cb};
+    let auth: RequestHandler = (req, res, next) => {return next(req,res);};
 
     if (needsOauth) {
       console.log("Setting up OAuth")
-      let sess = {
-        secret: mcpClientSecret + "sess", // Just reuse the secret
-        cookie: {}
-      }
-      app.use(session(sess));
-
-      app.use(passport.initialize());
-      app.use(passport.session());
-
-      passport.serializeUser((user, done) => {
-        done(null, JSON.stringify(user));
+      const proxyProvider = new ProxyOAuthServerProvider({
+        endpoints: {
+          authorizationUrl: mcpOauthUrl,
+          tokenUrl: mcpTokenUrl,
+        },
+        verifyAccessToken: async token => {
+          console.log("Token:", token)
+          return {
+            token,
+            clientId: '123',
+            scopes: ['openid', 'email', 'profile']
+          };
+        },
+        getClient: async client_id => {
+          return {
+            client_id,
+            redirect_uris: [`${mcpPublicHost}/oauth/callback`]
+          };
+        }
       });
 
-      passport.deserializeUser(async (saved: string, done) => {
-        done(null, JSON.parse(saved));
-      });
+      app.use(
+        mcpAuthRouter({
+          provider: proxyProvider,
+          issuerUrl: new URL('https://rauthy.ealex.net'),
+          baseUrl: new URL('https://rauthy.ealex.net'),
+        })
+      );
+
 
       const allowedUsers = mcpAllowedUsers.split(",").map(user => user.trim());
 
-      let oauth2Strategy = new OAuth2Strategy({
-          authorizationURL: mcpOauthUrl,
-          tokenURL: mcpTokenUrl,
-          clientID: mcpClientId,
-          clientSecret: mcpClientSecret,
-          callbackURL: `${mcpPublicHost}/oauth/callback`,
-          scope: ["email"],
-        },
-        function(accessToken, refreshToken, results, profile, cb) {
-          const decoded = jwtDecode(results['id_token']);
-          if (allowedUsers.length > 0 && (!allowedUsers.includes(decoded["email"]) || !decoded["email_verified"])) {
-            return cb("User not allowed", false);
-          }
-          return cb(null, {
-            "id": decoded["sub"],
-            "username": decoded["email"],
-          });
-        }
-      );
-      passport.use(oauth2Strategy);
+      auth = requireBearerAuth({provider: proxyProvider,});
 
-      app.get('/oauth/callback',
-        passport.authenticate('oauth2', { failureRedirect: '/' }),
-        function(req, res) {
-          // Successful authentication, redirect home.
-          res.redirect('/');
-        });
-
-      auth = passport.authenticate('oauth2', { failureRedirect: '/' });
+      // if (allowedUsers.length > 0 && (!allowedUsers.includes(decoded["email"]) || !decoded["email_verified"])) {
+      //   return cb("User not allowed", false);
+      // }
     }
 
     // Store transports for each session
@@ -184,7 +172,7 @@ The document tools return JSON data with document IDs that you can use to constr
       );
     });
 
-    app.delete("/mcp", auth, async (req, res) => {
+    app.delete("/mcp", async (req, res) => {
       res.writeHead(405).end(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -222,7 +210,7 @@ The document tools return JSON data with document IDs that you can use to constr
       }
     });
 
-    app.post("/messages", auth, async (req, res) => {
+    app.post("/messages", async (req, res) => {
       const sessionId = req.query.sessionId as string;
       const transport = sseTransports[sessionId];
       if (transport) {
