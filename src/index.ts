@@ -88,7 +88,7 @@ The document tools return JSON data with document IDs that you can use to constr
     app.use(express.urlencoded({ extended: false }));
 
     let needsOauth = mcpClientId && mcpClientSecret;
-    let auth: RequestHandler = (req, res, next) => {return next(req,res);};
+    let auth: RequestHandler = (req, res, next) => {return next();};
 
     if (needsOauth) {
       console.log("Setting up OAuth")
