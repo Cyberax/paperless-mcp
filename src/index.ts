@@ -84,6 +84,10 @@ The document tools return JSON data with document IDs that you can use to constr
   if (useHttp) {
     console.info("Using the HTTP mode");
     const app = express();
+    app.use((req,res, next) => {
+      console.log("req: ", req);
+      return next();
+    });
     app.use(express.json());
     app.use(express.urlencoded({ extended: false }));
 
